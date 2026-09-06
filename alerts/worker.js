@@ -1,0 +1,34 @@
+import {records,position,groundDistance,crossing} from './core.js';
+const json=(v,status=200,headers={})=>Response.json(v,{status,headers});
+async function config(env){return await env.DB.prepare('SELECT * FROM settings WHERE id=1').first();}
+async function status(env){const c=await config(env);return {enabled:!!c.enabled,lat:c.lat??0,lon:c.lon??0,locationSet:c.lat!==null&&c.lon!==null,lastCheck:c.last_check,lastError:c.last_error,lastSent:c.last_sent,configured:!!env.TELEGRAM_BOT_TOKEN&&!!env.TELEGRAM_CHAT_ID};}
+async function telegram(env,method,body){const r=await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/${method}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),signal:AbortSignal.timeout(15000)});const j=await r.json();if(!r.ok||!j.ok)throw Error('Telegram delivery failed. Check bot credentials, chat ID, and that you have started the bot.');return j.result;}
+async function send(env,text){if(!/^\d+$/.test(env.TELEGRAM_CHAT_ID||''))throw Error('A private Telegram chat ID is required.');await telegram(env,'sendMessage',{chat_id:env.TELEGRAM_CHAT_ID,text});}
+async function authorized(request,key){if(!key||key.length<32)return false;const supplied=request.headers.get('Authorization')||'';const digest=s=>crypto.subtle.digest('SHA-256',new TextEncoder().encode(s));const a=new Uint8Array(await digest(supplied)),b=new Uint8Array(await digest(`Bearer ${key}`));let diff=0;for(let i=0;i<a.length;i++)diff|=a[i]^b[i];return diff===0;}
+async function catalog(env){const existing=await env.CATALOG.get('active','json');if(existing&&Date.now()-existing.time<7200000)return existing.data;const r=await fetch('https://celestrak.org/NORAD/elements/gp.php?GROUP=active&FORMAT=json',{headers:{'User-Agent':'OrbitWatch/1.0'},signal:AbortSignal.timeout(25000)});if(!r.ok)throw Error('Satellite catalog unavailable; no passes checked.');const data=await r.json();if(!Array.isArray(data)||!data.length||!data[0].NORAD_CAT_ID)throw Error('Invalid satellite catalog.');await env.CATALOG.put('active',JSON.stringify({time:Date.now(),data}),{expirationTtl:10800});return data;}
+export async function check(env,now=Date.now()){
+ const c=await config(env);if(!c.enabled||c.lat===null||c.lon===null)return;
+ // A short lease stops overlapping scheduled invocations; expiry recovers from a crashed run.
+ const lease=await env.DB.prepare('UPDATE settings SET lease_until=? WHERE id=1 AND lease_until<?').bind(now+120000,now).run();if(!lease.meta.changes)return;
+ try{const {sats}=records(await catalog(env),now);if(!sats.length)throw Error('No fresh orbital records are available.');const events=[];const loc={lat:c.lat,lon:c.lon};
+ for(const s of sats){const p=position(s,now);if(!p||groundDistance(loc,p)>1600)continue;const hit=crossing(s,loc,now-60000,now+60000);if(!hit)continue;const recent=await env.DB.prepare('SELECT sent_at FROM events WHERE satellite_id=?').bind(s.id).first();if(recent&&now-recent.sent_at<600000)continue;events.push({s,hit});}
+ // Check again so a location change or pause during calculations does not send old-location alerts.
+ const latest=await config(env);if(!latest.enabled||latest.revision!==c.revision)return;
+ for(let i=0;i<events.length;i+=12){const batch=events.slice(i,i+12);const text='Orbit Watch · 45 km ground-track alert\n\n'+batch.map(({s,hit})=>`${s.name} (NORAD ${s.id})\nClosest approach ${new Date(hit.time).toISOString().slice(11,19)} UTC · ${hit.distance.toFixed(1)} km from your center`).join('\n\n')+'\n\nPredicted ground distance, not viewing distance. Passes may be imminent or just occurred. Visibility is not guaranteed.';
+ await send(env,text);await env.DB.batch(batch.map(({s})=>env.DB.prepare('INSERT INTO events(satellite_id,sent_at) VALUES(?,?) ON CONFLICT(satellite_id) DO UPDATE SET sent_at=excluded.sent_at').bind(s.id,now)));await env.DB.prepare('UPDATE settings SET last_sent=? WHERE id=1').bind(now).run();}
+ await env.DB.prepare('UPDATE settings SET last_check=?,last_error=NULL WHERE id=1').bind(now).run();await env.DB.prepare('DELETE FROM events WHERE sent_at<?').bind(now-86400000).run();
+ }catch(e){await env.DB.prepare('UPDATE settings SET last_error=? WHERE id=1').bind(e instanceof Error?e.message:'Background check failed.').run();}finally{await env.DB.prepare('UPDATE settings SET lease_until=0 WHERE id=1').run();}
+}
+export default {
+ async scheduled(controller,env,ctx){ctx.waitUntil(check(env));},
+ async fetch(request,env){const origin=request.headers.get('Origin');const cors={'Access-Control-Allow-Origin':env.SITE_ORIGIN,'Access-Control-Allow-Methods':'GET, POST, OPTIONS','Access-Control-Allow-Headers':'Authorization, Content-Type','Vary':'Origin','Cache-Control':'no-store'};if(origin&&origin!==env.SITE_ORIGIN)return json({error:'Origin not allowed'},403);
+ if(request.method==='OPTIONS')return new Response(null,{status:204,headers:cors});if(!await authorized(request,env.ACCESS_KEY))return json({error:'Invalid service access key.'},401,cors);
+ try{const path=new URL(request.url).pathname;if(path==='/status'&&request.method==='GET')return json(await status(env),200,cors);
+ if(path==='/settings'&&request.method==='POST'){const b=await request.json();if(typeof b.lat!=='number'||!Number.isFinite(b.lat)||Math.abs(b.lat)>90||typeof b.lon!=='number'||!Number.isFinite(b.lon)||Math.abs(b.lon)>180||typeof b.enabled!=='boolean')return json({error:'Valid latitude, longitude and enabled setting are required.'},400,cors);
+ const c=await config(env);if(b.enabled&&!c.verified)return json({error:'Send and confirm a Telegram test before enabling alerts.'},400,cors);
+ await env.DB.prepare('UPDATE settings SET lat=?,lon=?,enabled=?,revision=revision+1 WHERE id=1').bind(b.lat,b.lon,b.enabled?1:0).run();return json(await status(env),200,cors);}
+ if(path==='/test'&&request.method==='POST'){const chat=await telegram(env,'getChat',{chat_id:env.TELEGRAM_CHAT_ID});if(chat.type!=='private')return json({error:'Use your personal private chat with the bot.'},400,cors);await send(env,'Orbit Watch test: your Telegram connection works. Alerts are not enabled by this test. Save your location and switch on notifications in the website.');await env.DB.prepare('UPDATE settings SET verified=1 WHERE id=1').run();return json({ok:true},200,cors);}
+ return json({error:'Not found'},404,cors);
+ }catch{return json({error:'The request failed. Check service configuration, bot token, and private chat ID.'},500,cors);}
+ }
+};

@@ -1,0 +1,14 @@
+{
+  "name": "orbit-watch-alert-service",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "deploy": "wrangler deploy"
+  },
+  "dependencies": {
+    "satellite.js": "6.0.2"
+  },
+  "devDependencies": {
+    "wrangler": "4.92.0"
+  }
+}
