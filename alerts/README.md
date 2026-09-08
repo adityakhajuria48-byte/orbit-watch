@@ -56,7 +56,7 @@ Copy the deployed HTTPS workers.dev origin. Cron changes can take several minute
 
 1. Open your Orbit Watch website and set your location.
 2. Enter the alert service origin and ACCESS_KEY, then Connect.
-3. Click Save alert location. The 45 km radius is fixed.
+3. Click Save alert area. Choose an observation radius between 10 and 1,000 km, in 5 km steps, and save it with your location.
 4. Click Send me a Telegram test. Confirm it arrives in YOUR private chat.
 5. Enable notifications. Wait until Last background check advances and the status says Background monitoring active.
 6. Close the website: the scheduled service continues to run.
@@ -78,3 +78,13 @@ If a Telegram credential or recipient changes, pause the service, update secrets
 - satellite.js / SGP4: https://github.com/shashwatak/satellite-js
 - Telegram Bot API: https://core.telegram.org/bots/api
 - Cloudflare Cron Triggers: https://developers.cloudflare.com/workers/configuration/cron-triggers/
+
+## Upgrading a previously deployed 45 km service
+
+Pause alerts. Back up the database, then run `npx wrangler d1 execute orbit-alerts --remote --file=upgrade-radius.sql` once, only for a database created by the earlier version. New installations already include this column and must not run this upgrade. Deploy the new Worker code with `npm run deploy`, reconnect the website, save your alert area, and re-enable alerts. Existing installations default to 45 km. The service reports apiVersion 2 and radiusKm; the website will identify older services that need upgrading.
+
+## Satellite selection (API v3)
+
+The website can save `alertMode: "all"` or `"selected"` and an array of `satelliteIds` (NORAD IDs). An empty selected list sends no satellite alerts. Saving favorites locally does not change the running service until **Save alert area** is clicked. Existing API v2 installations must run `npx wrangler d1 execute orbit-alerts --remote --file=upgrade-favorites.sql` using their configured database name, then deploy the updated worker. Older fixed-radius installations must first apply `upgrade-radius.sql`. Fresh installs use only `schema.sql`; do not apply ALTER migrations again.
+
+The `python/` directory contains the browser and CLI prediction engine. This standalone alert checker remains a JavaScript Cloudflare Worker; Python browser calculations do not send background messages.

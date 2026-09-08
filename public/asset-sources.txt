@@ -1,0 +1,11 @@
+world-land.geojson: Natural Earth 1:110m land polygons, public domain.
+https://github.com/nvkelso/natural-earth-vector/blob/master/geojson/ne_110m_land.geojson
+https://www.naturalearthdata.com/about/terms-of-use/
+
+python/sgp4-2.27-py3-none-any.whl: official sgp4 2.27 pure-Python distribution.
+https://pypi.org/project/sgp4/2.27/
+MIT license included in wheel's dist-info/licenses/LICENSE.
+
+Pyodide 0.29.4: loaded from https://cdn.jsdelivr.net/pyodide/v0.29.4/full/
+https://pyodide.org/en/0.29.4/
+Mission-profile sources and review date appear in each profile.

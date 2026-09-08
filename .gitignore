@@ -41,10 +41,14 @@ next-env.d.ts
 /outputs/
 /work/
 
-# Local caches and credentials
-**/node_modules/
-**/.wrangler/
-**/.env*
+# Local Python state and nested service secrets
+**/__pycache__/
+**/.venv/
 **/.dev.vars*
+**/.env*
+**/node_modules/
 *.tsbuildinfo
+
+# Local caches and credentials
+**/.wrangler/
 *.log
