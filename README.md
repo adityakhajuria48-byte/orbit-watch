@@ -31,3 +31,7 @@ The satellite calculation is in `lib/orbit/core.js`; the browser worker is `publ
 ## Telegram
 
 The intended bot is **@PassPredictor_bot**. Alerts are not configured or enabled. Follow `alerts/README.md` to deploy the background checker and securely configure its bot token, verified private chat ID, and access key. Never commit these values.
+
+## Focused observatory layout
+
+Map, Passes, Satellites and Radar now use accessible persistent tabs. Changing views preserves prediction jobs and current selections. Location/radius controls sit beside the workspace on desktop and remain available through the overview shortcuts on mobile. Telegram configuration is collapsible. The map supports hover labels, keyboard panning/zoom, and pauses drawing when its tab is hidden. Catalog filtering is memoized; no new packages or fonts were added. Reduced-motion preferences disable decorative transitions.
